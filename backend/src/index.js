@@ -16,31 +16,34 @@ dotenv.config()
 const app = express()
 const PORT = process.env.PORT || 4000
 
-// ── Middleware ────────────────────────────────────────────────────────────────
-
-app.use(helmet())
+// ── CORS ──────────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  process.env.FRONTEND_URL,
+].filter(Boolean)
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) return callback(null, true)
+    callback(new Error(`CORS blocked: ${origin}`))
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }))
 
+app.use(helmet())
+
 // Stripe webhook needs raw body — mount BEFORE json parser
 app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json' }))
-
 app.use(express.json({ limit: '5mb' }))
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - Rate limit check`)
-  next()
-})
 
-  
-
-// Rate limiting
+// ── Rate limiting ─────────────────────────────────────────────────────────────
 const apiLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 15 minutes
-  max: 100000,
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 500 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' }
@@ -48,7 +51,7 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'production' ? 50 : 10000,
   message: { error: 'Too many auth attempts' }
 })
 
@@ -56,7 +59,6 @@ app.use('/api/', apiLimiter)
 app.use('/api/auth/', authLimiter)
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-
 app.use('/api/auth', authRoutes)
 app.use('/api/scores', scoreRoutes)
 app.use('/api/draws', drawRoutes)
@@ -64,13 +66,11 @@ app.use('/api/charities', charityRoutes)
 app.use('/api/subscriptions', subscriptionRoutes)
 app.use('/api/admin', adminRoutes)
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV })
 })
 
 // ── Error handler ─────────────────────────────────────────────────────────────
-
 app.use((err, req, res, next) => {
   console.error(`[${new Date().toISOString()}] ${req.method} ${req.path}:`, err.message)
   res.status(err.status || 500).json({
@@ -79,8 +79,8 @@ app.use((err, req, res, next) => {
 })
 
 app.listen(PORT, () => {
-  console.log(`✅  Pargive API running on http://localhost:${PORT}`)
-  console.log(`   Environment: ${process.env.NODE_ENV}`)
+  console.log(`Pargive API running on port ${PORT}`)
+  console.log(`Allowed origins: ${allowedOrigins.join(', ')}`)
 })
 
 export default app
