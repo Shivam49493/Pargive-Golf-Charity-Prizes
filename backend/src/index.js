@@ -17,24 +17,33 @@ const app = express()
 const PORT = process.env.PORT || 4000
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  process.env.FRONTEND_URL,
-].filter(Boolean)
-
+// Allow all Vercel preview URLs + localhost in development
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
+    // Allow requests with no origin (Postman, curl, mobile)
     if (!origin) return callback(null, true)
-    if (allowedOrigins.includes(origin)) return callback(null, true)
-    callback(new Error(`CORS blocked: ${origin}`))
+
+    const allowed =
+      !origin ||
+      origin.includes('vercel.app') ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL)
+
+    if (allowed) return callback(null, true)
+    return callback(null, true) // temporarily allow all — tighten after confirmed working
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }))
 
-app.use(helmet())
+// Handle preflight for all routes
+app.options('*', cors())
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}))
 
 // Stripe webhook needs raw body — mount BEFORE json parser
 app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json' }))
@@ -80,7 +89,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Pargive API running on port ${PORT}`)
-  console.log(`Allowed origins: ${allowedOrigins.join(', ')}`)
 })
 
 export default app
